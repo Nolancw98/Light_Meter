@@ -39,11 +39,9 @@ SOFTWARE.
 #define TFT_RST        9 // Or set to -1 and connect to Arduino RESET pin
 #define TFT_DC         8
 const int buttonPin = 7;
-const int encoderButtonPin = 4;
-
-const int iso_button_pin = 3;
-const int aperture_button_pin = 2;
-const int shutter_button_pin = 1;
+const int iso_button_pin = 4;
+const int aperture_button_pin = 3;
+const int shutter_button_pin = 2;
 
 /*
  * Instantiate Objects
@@ -51,39 +49,42 @@ const int shutter_button_pin = 1;
 // For 1.14", 1.3", 1.54", 1.69", and 2.0" TFT with ST7789:
 Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591); // pass in a number for the sensor identifier (for your use later)
-Encoder enc = Encoder(5,6);
+Encoder iso_enc = Encoder(5,6);
+Encoder aperture_enc = Encoder(14,15);
+Encoder shutter_enc = Encoder(20,21);
 
 
 /*
  * Create Global Variables
  */
 float lux;
-long oldPosition;
-int buttonState;
-int encoderButtonState;
+int button_state;
+long iso_old_pos, aperture_old_pos, shutter_old_pos;
+int iso_button_state, aperture_button_state, shutter_button_state;
 
 
 /*
  * Create Arrays and Sizes of Arrays for Camera Settings
  */
-String testArray[] = {"zero", "one", "two", "three", "four", "five", "six"};
-int testArraySize = 7;
+float aperture[] = {5.3, 5.6, 6.3, 7.1, 8, 9, 10, 11, 13, 14, 16, 18, 20, 22, 25, 29, 32, 36};
+int aperture_array_size = 18;
 
-long aperture[] = {5.3, 5.6, 6.3, 7.1, 8, 9, 10, 11, 13, 14, 16, 18, 20, 22, 25, 29, 32, 36};
-long iso[] = {100, 200, 400, 800, 1600, 3200, 6400, 12800};
-long shutter_value[] = {60.0, 30.0, 25.0, 20.0, 15.0, 13.0, 10.0, 8.0, 6.0, 5.0, 4.0, 3.0, 
-                      2.5, 2, 1.6, 1.3, 1, 1/1.3, 1/1.6, 1/2.0, 1/2.5, 1/3.0, 1/4.0, 1/5.0, 
+int iso[] = {100, 200, 400, 800, 1600, 3200, 6400, 12800};
+int iso_array_size = 8;
+
+float shutter_value[] = {60.0, 30.0, 25.0, 20.0, 15.0, 13.0, 10.0, 8.0, 6.0, 5.0, 4.0, 3.0, 
+                      2.5, 2, 1.6, 1.3, 1.0, 1/1.3, 1/1.6, 1/2.0, 1/2.5, 1/3.0, 1/4.0, 1/5.0, 
                       1/6.0, 1/8.0, 1/10.0, 1/13.0, 1/15.0, 1/20.0, 1/25.0, 1/30.0, 1/40.0, 
                       1/50.0, 1/60.0, 1/80.0, 1/100.0, 1/125.0, 1/160.0, 1/200.0, 1/250.0,
                       1/320.0, 1/400.0, 1/500.0, 1/640.0, 1/800.0, 1/1000.0, 1/1250.0,
-                      1/1600.0, 1/2000.0, 1/2500.0, 1/3200.0, 1/4000.0};
-                      
+                      1/1600.0, 1/2000.0, 1/2500.0, 1/3200.0, 1/4000.0};                     
 String shutter_string[] = {"60.0", "30.0", "25.0", "20.0", "15.0", "13.0", "10.0", "8.0", "6.0", "5.0", "4.0", "3.0", 
-                      "2.5", "2", "1.6", "1.3", "1", "1/1.3", "1/1.6", "1/2.0", "1/2.5", "1/3.0", "1/4.0", "1/5.0", 
-                      "1/6.0", "1/8.0", "1/10.0", "1/13.0", "1/15.0", "1/20.0", "1/25.0", "1/30.0", "1/40.0", 
-                      "1/50.0", "1/60.0", "1/80.0", "1/100.0", "1/125.0", "1/160.0", "1/200.0", "1/250.0",
-                      "1/320.0", "1/400.0", "1/500.0", "1/640.0", "1/800.0", "1/1000.0", "1/1250.0",
-                      "1/1600.0", "1/2000.0", "1/2500.0", "1/3200.0", "1/4000.0"};
+                      "2.5", "2", "1.6", "1.3", "1.0", "1/1.3", "1/1.6", "1/2", "1/2.5", "1/3", "1/4", "1/5", 
+                      "1/6", "1/8", "1/10", "1/13", "1/15", "1/20", "1/25", "1/30", "1/40", 
+                      "1/50", "1/60", "1/80", "1/100", "1/125", "1/160", "1/200", "1/250",
+                      "1/320", "1/400", "1/500", "1/640", "1/800", "1/1000", "1/1250",
+                      "1/1600", "1/2000", "1/2500", "1/3200", "1/4000"};
+int shutter_array_size = 53;
 
 /*
  * Init method, only runs once. 
@@ -110,16 +111,24 @@ void setup() {
   configureSensor(); //Configure this sensor
 
   //set initial conditions for push button
-  buttonState = 0;
+  button_state = 0;
   pinMode(buttonPin, INPUT);
 
-  //Set initial conditions for encoder
-  encoderButtonState = 1;
-  pinMode(buttonPin, INPUT);
+  //Set initial conditions for encoder buttons
+  iso_button_state = 1;
+  pinMode(iso_button_pin, INPUT_PULLUP);
+
+  aperture_button_state = 1;
+  pinMode(aperture_button_pin, INPUT_PULLUP);
+
+  shutter_button_state = 1;
+  pinMode(shutter_button_pin, INPUT_PULLUP);
 
   //Initial Variables to prevent errors
   lux = -999;
-  oldPosition = -999;
+  iso_old_pos = -999;
+  aperture_old_pos = -999;
+  shutter_old_pos = -999;
 }
 
 /*
@@ -128,25 +137,57 @@ void setup() {
 void loop() {
 
   //These are guarunteed to happen every loop
-  long newPosition = enc.read();
-  buttonState = digitalRead(buttonPin); 
-
+  long iso_new_pos, aperture_new_pos, shutter_new_pos;
+  iso_new_pos = iso_enc.read();
+  aperture_new_pos = aperture_enc.read();
+  shutter_new_pos = shutter_enc.read();
   
-  if(newPosition != oldPosition)
+  button_state = digitalRead(buttonPin); 
+  iso_button_state = digitalRead(iso_button_pin);
+  aperture_button_state = digitalRead(aperture_button_pin);
+  shutter_button_state = digitalRead(shutter_button_pin);
+
+  //Check for updates with ISO encoder
+  if(iso_new_pos != iso_old_pos && iso_button_state == 0)
   {
-    oldPosition = newPosition;
-    if(newPosition % 4 == 0)  //Only update when reach detents
-      updateTFT(lux, newPosition/4, testArray, testArraySize); //Display count of detents, not raw encoder value
+    iso_old_pos = iso_new_pos;
+    if(iso_new_pos % 4 == 0)  //Only update when reach detents
+      updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4); //Display count of detents, not raw encoder value
   }
 
-  if(buttonState == HIGH)
+  //Check for updates with aperture encoder
+  if(aperture_new_pos != aperture_old_pos && aperture_button_state == 0)
+  {
+    aperture_old_pos = aperture_new_pos;
+    if(aperture_new_pos % 4 == 0)  //Only update when reach detents
+      updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4); //Display count of detents, not raw encoder value
+  }
+
+  //Check for updates with shutter speed encoder
+  if(shutter_new_pos != shutter_old_pos && shutter_button_state == 0)
+  {
+    shutter_old_pos = shutter_new_pos;
+    if(shutter_new_pos % 4 == 0)  //Only update when reach detents
+      updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4); //Display count of detents, not raw encoder value
+  }
+
+  if(button_state == HIGH)
   {
     lux = advancedRead();
-    updateTFT(lux, newPosition, testArray, testArraySize);
+    updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4); //Display count of detents, not raw encoder value
   }
+
+  /*
+  Serial.print("ISO Button: ");
+  Serial.print(iso_button_state);
+  Serial.print(" Aperture Button: ");
+  Serial.print(aperture_button_state);
+  Serial.print(" Shutter Button: ");
+  Serial.println(shutter_button_state);
+  */
 }
 
-void updateTFT(float lux, long encoderPosition, String arr[], int arrSize){
+void updateTFT(float lux, int iso_pos, long aperture_pos, long shutter_pos){
 
   int header_indent = 10;
   int data_indent = 100;
@@ -160,19 +201,34 @@ void updateTFT(float lux, long encoderPosition, String arr[], int arrSize){
   drawTextGeneric("Lux:", ST77XX_WHITE, header_indent, top_indent + 0*spacing, fontSize);
   drawTextGeneric(&luxStr[0], ST77XX_WHITE, data_indent, top_indent + 0*spacing, fontSize);
 
-  String encoderPosStr = String(encoderPosition);
-  drawTextGeneric("Enc:", ST77XX_WHITE, header_indent, top_indent + 1*spacing, fontSize);
-  drawTextGeneric(&encoderPosStr[0], ST77XX_WHITE, data_indent, top_indent + 1*spacing, fontSize);
 
-  if(encoderPosition >= arrSize - 1) {
-    encoderPosition = arrSize - 1;
-  }
-  if(encoderPosition <= 0) {
-    encoderPosition = 0;
-  }
+  //Display ISO and ISO value
+  if(iso_pos >= iso_array_size - 1)
+    iso_pos = iso_array_size - 1;
+  if(iso_pos <= 0)
+    iso_pos = 0;
+  String iso_str = String(iso[iso_pos]);
+  drawTextGeneric("ISO:", ST77XX_WHITE, header_indent, top_indent + 1*spacing, fontSize);
+  drawTextGeneric(&iso_str[0], ST77XX_WHITE, data_indent, top_indent + 1*spacing, fontSize);
+
+  //Display Aperture and Aperture Value
+  if(aperture_pos >= aperture_array_size - 1)
+    aperture_pos = aperture_array_size - 1;
+  if(aperture_pos <= 0)
+    aperture_pos = 0;
+  String aperture_str = String(aperture[aperture_pos]);
+  drawTextGeneric("APE: f", ST77XX_WHITE, header_indent, top_indent + 2*spacing, fontSize);
+  drawTextGeneric(&aperture_str[0], ST77XX_WHITE, data_indent + 20, top_indent + 2*spacing, fontSize);
+
+  //Display Shutter Speed and Shutter Speed Value
+  if(shutter_pos >= shutter_array_size - 1)
+    shutter_pos = shutter_array_size - 1;
+  if(shutter_pos <= 0)
+    shutter_pos = 0;
+  String shutter_str = shutter_string[shutter_pos];
+  drawTextGeneric("SHT:", ST77XX_WHITE, header_indent, top_indent + 3*spacing, fontSize);
+  drawTextGeneric(&shutter_str[0], ST77XX_WHITE, data_indent, top_indent + 3*spacing, fontSize);
   
-  drawTextGeneric("Arr:", ST77XX_WHITE, header_indent, top_indent + 2*spacing, fontSize);
-  drawTextGeneric(&(arr[encoderPosition])[0], ST77XX_WHITE, data_indent, top_indent + 2*spacing, fontSize);
 }
 
 void drawTextGeneric(char *text, uint16_t color, int x, int y, int fontSize) {
