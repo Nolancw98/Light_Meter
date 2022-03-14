@@ -42,6 +42,7 @@ const int buttonPin = 7;
 const int iso_button_pin = 4;
 const int aperture_button_pin = 3;
 const int shutter_button_pin = 2;
+const float C = 12.5; //incident light meter calibration constant
 
 /*
  * Instantiate Objects
@@ -61,7 +62,7 @@ float lux;
 int button_state;
 long iso_old_pos, aperture_old_pos, shutter_old_pos;
 int iso_button_state, aperture_button_state, shutter_button_state;
-
+int calculated;
 
 /*
  * Create Arrays and Sizes of Arrays for Camera Settings
@@ -69,10 +70,10 @@ int iso_button_state, aperture_button_state, shutter_button_state;
 float aperture[] = {5.3, 5.6, 6.3, 7.1, 8, 9, 10, 11, 13, 14, 16, 18, 20, 22, 25, 29, 32, 36};
 int aperture_array_size = 18;
 
-int iso[] = {100, 200, 400, 800, 1600, 3200, 6400, 12800};
+float iso[] = {100, 200, 400, 800, 1600, 3200, 6400, 12800};
 int iso_array_size = 8;
 
-float shutter_value[] = {60.0, 30.0, 25.0, 20.0, 15.0, 13.0, 10.0, 8.0, 6.0, 5.0, 4.0, 3.0, 
+float shutter[] = {60.0, 30.0, 25.0, 20.0, 15.0, 13.0, 10.0, 8.0, 6.0, 5.0, 4.0, 3.0, 
                       2.5, 2, 1.6, 1.3, 1.0, 1/1.3, 1/1.6, 1/2.0, 1/2.5, 1/3.0, 1/4.0, 1/5.0, 
                       1/6.0, 1/8.0, 1/10.0, 1/13.0, 1/15.0, 1/20.0, 1/25.0, 1/30.0, 1/40.0, 
                       1/50.0, 1/60.0, 1/80.0, 1/100.0, 1/125.0, 1/160.0, 1/200.0, 1/250.0,
@@ -129,6 +130,7 @@ void setup() {
   iso_old_pos = -999;
   aperture_old_pos = -999;
   shutter_old_pos = -999;
+  calculated = 0;
 }
 
 /*
@@ -147,34 +149,86 @@ void loop() {
   aperture_button_state = digitalRead(aperture_button_pin);
   shutter_button_state = digitalRead(shutter_button_pin);
 
+
+  //set calculated
+  if(iso_button_state == 0)
+    calculated = 0;
+  if(aperture_button_state == 0)
+    calculated = 1;
+  if(shutter_button_state == 0)
+    calculated = 2;
+
   //Check for updates with ISO encoder
-  if(iso_new_pos != iso_old_pos && iso_button_state == 0)
+  if(iso_new_pos != iso_old_pos && calculated != 0)
   {
     iso_old_pos = iso_new_pos;
     if(iso_new_pos % 4 == 0)  //Only update when reach detents
-      updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4); //Display count of detents, not raw encoder value
+      updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4, calculated); //Display count of detents, not raw encoder value
   }
 
   //Check for updates with aperture encoder
-  if(aperture_new_pos != aperture_old_pos && aperture_button_state == 0)
+  if(aperture_new_pos != aperture_old_pos && calculated != 1)
   {
     aperture_old_pos = aperture_new_pos;
     if(aperture_new_pos % 4 == 0)  //Only update when reach detents
-      updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4); //Display count of detents, not raw encoder value
+      updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4, calculated); //Display count of detents, not raw encoder value
   }
 
   //Check for updates with shutter speed encoder
-  if(shutter_new_pos != shutter_old_pos && shutter_button_state == 0)
+  if(shutter_new_pos != shutter_old_pos && calculated != 2)
   {
     shutter_old_pos = shutter_new_pos;
     if(shutter_new_pos % 4 == 0)  //Only update when reach detents
-      updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4); //Display count of detents, not raw encoder value
+      updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4, calculated); //Display count of detents, not raw encoder value
   }
 
   if(button_state == HIGH)
   {
     lux = advancedRead();
-    updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4); //Display count of detents, not raw encoder value
+    
+    /*
+     * From https://en.wikipedia.org/wiki/Exposure_value the equation to calculate exposure value is as follows
+     * N^2 / t = (E * S) / C
+     * s.t.
+     * N = aperture (f - number)
+     * t = exposure time (aka shutter speed in seconds)
+     * E = illuminance (lux)
+     * S = iso arithmetic speed
+     * C = incident-light meter calibration constant (assume 12.5)
+     */
+    int N;
+    float t, S;
+    float raw_iso = -1;
+    float raw_aperture = -1;
+    float raw_shutter = -1;
+    switch(calculated) {
+      case 0: //calculate iso
+        N = aperture[aperture_new_pos/4];
+        t = shutter[shutter_new_pos/4];
+        raw_iso = (sq(N) * C) / (t * lux);
+        iso_new_pos = closest_index(raw_iso, iso, iso_array_size) * 4;
+        break;
+      case 1: //calculate aperture
+        t = shutter[shutter_new_pos/4];
+        S = iso[iso_new_pos/4];
+        raw_aperture = sqrt((t * lux * S) / C);
+        aperture_new_pos = closest_index(raw_aperture, aperture, aperture_array_size) * 4;
+        break;
+      case 2: //calculate shutter
+        N = aperture[aperture_new_pos/4];
+        S = iso[iso_new_pos/4];
+        raw_shutter = (sq(N) * C) / (lux * S);
+        shutter_new_pos = closest_index(raw_shutter, shutter, shutter_array_size) * 4;
+        break;        
+    }
+    updateTFT(lux, iso_new_pos/4, aperture_new_pos/4, shutter_new_pos/4, calculated); //Display count of detents, not raw encoder value
+
+    Serial.print("Raw ISO: ");
+    Serial.print(raw_iso);
+    Serial.print(" Raw f#: ");
+    Serial.print(raw_aperture);
+    Serial.print(" Raw Shutter: ");
+    Serial.println(raw_shutter);
   }
 
   /*
@@ -187,7 +241,21 @@ void loop() {
   */
 }
 
-void updateTFT(float lux, int iso_pos, long aperture_pos, long shutter_pos){
+float closest_index(float num, float arr[], int arr_size){
+  float curr = arr[0];
+  int index = 0;
+  for(int i = 0; i < arr_size - 1; i++)
+  {
+    if(abs(num - arr[i]) < abs(num - curr))
+    {
+      curr = arr[i];
+      index = i;
+    }
+  }
+  return index;
+}
+
+void updateTFT(float lux, int iso_pos, long aperture_pos, long shutter_pos, int calculated){
 
   int header_indent = 10;
   int data_indent = 100;
@@ -201,6 +269,23 @@ void updateTFT(float lux, int iso_pos, long aperture_pos, long shutter_pos){
   drawTextGeneric("Lux:", ST77XX_WHITE, header_indent, top_indent + 0*spacing, fontSize);
   drawTextGeneric(&luxStr[0], ST77XX_WHITE, data_indent, top_indent + 0*spacing, fontSize);
 
+  switch(calculated){
+    case 0: //iso is being calculated
+      drawTextGeneric("ISO:", ST77XX_YELLOW, header_indent, top_indent + 1*spacing, fontSize);
+      drawTextGeneric("APE: f", ST77XX_WHITE, header_indent, top_indent + 2*spacing, fontSize);
+      drawTextGeneric("SHT:", ST77XX_WHITE, header_indent, top_indent + 3*spacing, fontSize);
+      break;
+    case 1: //aperture is being calculated
+      drawTextGeneric("ISO:", ST77XX_WHITE, header_indent, top_indent + 1*spacing, fontSize);
+      drawTextGeneric("APE: f", ST77XX_YELLOW, header_indent, top_indent + 2*spacing, fontSize);
+      drawTextGeneric("SHT:", ST77XX_WHITE, header_indent, top_indent + 3*spacing, fontSize);
+      break;
+    case 2: //shutter is being calculated
+      drawTextGeneric("ISO:", ST77XX_WHITE, header_indent, top_indent + 1*spacing, fontSize);
+      drawTextGeneric("APE: f", ST77XX_WHITE, header_indent, top_indent + 2*spacing, fontSize);
+      drawTextGeneric("SHT:", ST77XX_YELLOW, header_indent, top_indent + 3*spacing, fontSize);
+      break;
+  }
 
   //Display ISO and ISO value
   if(iso_pos >= iso_array_size - 1)
@@ -208,7 +293,6 @@ void updateTFT(float lux, int iso_pos, long aperture_pos, long shutter_pos){
   if(iso_pos <= 0)
     iso_pos = 0;
   String iso_str = String(iso[iso_pos]);
-  drawTextGeneric("ISO:", ST77XX_WHITE, header_indent, top_indent + 1*spacing, fontSize);
   drawTextGeneric(&iso_str[0], ST77XX_WHITE, data_indent, top_indent + 1*spacing, fontSize);
 
   //Display Aperture and Aperture Value
@@ -217,7 +301,7 @@ void updateTFT(float lux, int iso_pos, long aperture_pos, long shutter_pos){
   if(aperture_pos <= 0)
     aperture_pos = 0;
   String aperture_str = String(aperture[aperture_pos]);
-  drawTextGeneric("APE: f", ST77XX_WHITE, header_indent, top_indent + 2*spacing, fontSize);
+  
   drawTextGeneric(&aperture_str[0], ST77XX_WHITE, data_indent + 20, top_indent + 2*spacing, fontSize);
 
   //Display Shutter Speed and Shutter Speed Value
@@ -226,7 +310,7 @@ void updateTFT(float lux, int iso_pos, long aperture_pos, long shutter_pos){
   if(shutter_pos <= 0)
     shutter_pos = 0;
   String shutter_str = shutter_string[shutter_pos];
-  drawTextGeneric("SHT:", ST77XX_WHITE, header_indent, top_indent + 3*spacing, fontSize);
+
   drawTextGeneric(&shutter_str[0], ST77XX_WHITE, data_indent, top_indent + 3*spacing, fontSize);
   
 }
